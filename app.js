@@ -37,12 +37,13 @@ app.factory('user', ['dialog', '$http', '$cookies', '$cookieStore', '$rootScope'
 	if($cookies.token) {
 		console.log('loggedIn');
 		token = $cookies.token;
-		$rootScope.$broadcast('userLogin');
+		$rootScope.$broadcast('login');
 	}
 	
 	return {
 		login: function(user, pass, persistent) {
 			$http.post('api/login.php', {username: user, password: pass}).success(function(data) {
+				$log.debug(data);
 				if(data.status == "ok") {
 					$log.debug("Login ok");
 					$cookies.token = data.token; //NOTE angularjs cookies are not able to change cookie lifetime etc.
@@ -51,8 +52,7 @@ app.factory('user', ['dialog', '$http', '$cookies', '$cookieStore', '$rootScope'
 					return true;
 				}
 				else {
-					loggedIn = false;
-					$log.error("Login failed");
+					alert("Login failed");
 					return false;
 				}
 			}).error(function() {
@@ -118,11 +118,9 @@ appCtrls.controller('userCtrl', ['user','dialog','$scope','$log', function(user,
 	];
 	
 	var createUserMenu = function() {
-		var userInfo = user.info();
-		console.log(userInfo);
 		$scope.userMenu = [
 			{
-				name: 'User: ' + user.info().username,
+				name: 'User: FIXME', // + user.info().username,
 				action: 'userConfig'
 			}
 		];
@@ -199,24 +197,19 @@ appCtrls.controller('loginCtrl', ['user','dialog','$scope','$log',function(user,
 	
 	$scope.login = function() {
 		user.login($scope.username, $scope.password);
-		if(user.token) {
-			dialog.ok();
-		}
-		else {
-			alert("Login failed");
-		}
+		dialog.ok();
 	}
 	
 	$scope.logout = function() {
 		user.logout();
 	};
 	
-	$scope.$on('userLogin', function(event) {
+	$scope.$on('login', function(event) {
 		$log.debug(event);
 		$scope.loggedIn = true;
 	});
 	
-	$scope.$on('userLogout', function(event) {
+	$scope.$on('logout', function(event) {
 		$log.debug(event);
 		$scope.loggedIn = false;
 	});
