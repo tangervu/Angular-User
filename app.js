@@ -1,6 +1,6 @@
 "use strict";
 
-var app = angular.module('app', ['ngCookies','appCtrls','ui.bootstrap']);
+var app = angular.module('app', ['appCtrls','ngCookies','ui.bootstrap']);
 
 app.factory('dialog', ['$modal','$log',function($modal,$log) {
 	var modalInstance;
@@ -30,9 +30,85 @@ app.factory('dialog', ['$modal','$log',function($modal,$log) {
 	};
 }]);
 
+app.factory('user', ['dialog', '$http', '$cookies', '$cookieStore', '$rootScope', '$log', function(dialog, $http, $cookies, $cookieStore, $rootScope, $log) {
+	
+	var token;
+	
+	if($cookies.token) {
+		console.log('loggedIn');
+		token = $cookies.token;
+		$rootScope.$broadcast('userLogin');
+	}
+	
+	return {
+		login: function(user, pass, persistent) {
+			$http.post('api/login.php', {username: user, password: pass}).success(function(data) {
+				if(data.status == "ok") {
+					$log.debug("Login ok");
+					$cookies.token = data.token; //NOTE angularjs cookies are not able to change cookie lifetime etc.
+					token = data.token;
+					$rootScope.$broadcast('login');
+					return true;
+				}
+				else {
+					loggedIn = false;
+					$log.error("Login failed");
+					return false;
+				}
+			}).error(function() {
+				return false;
+			});
+		},
+		logout: function() {
+			$http.post('api/logout.php', {token: token});
+			token = null;
+			$cookieStore.remove('token');
+			$rootScope.$broadcast('logout');
+			return true;
+		},
+		renew: function() {
+			$http.post('api/renew.php', {token: token}).success(function(data) {
+				if(data.status == "ok") {
+					$log.debug("Token renew ok");
+					$cookies.token = data.token;
+					token = data.token;
+					return true;
+				}
+				else {
+					$log.error("Token renew failed");
+					return false;
+				}
+			});
+		},
+		info: {
+			/* FIXME
+			$http.post('api/user.php', {token: tokens}).success(function(data) {
+				if(data.status == "ok") {
+					$log.debug("User info ok");
+					username = data.username;
+				}
+				else {
+					$log.error("Token renew failed");
+					username = null;
+				}
+			});
+			*/
+		}
+	};
+}]);
+
+/**
+ * Sample application controllers
+ */
+
 var appCtrls = angular.module('appCtrls', []);
 
-appCtrls.controller('userCtrl', ['dialog','$scope','$log', function(dialog, $scope, $log) {
+
+
+/**
+ * Controller for the navbar login link
+ */
+appCtrls.controller('userCtrl', ['user','dialog','$scope','$log', function(user, dialog, $scope, $log) {
 	
 	var defaultMenu = [
 		{
@@ -41,25 +117,40 @@ appCtrls.controller('userCtrl', ['dialog','$scope','$log', function(dialog, $sco
 		}
 	];
 	
+	var createUserMenu = function() {
+		var userInfo = user.info();
+		console.log(userInfo);
+		$scope.userMenu = [
+			{
+				name: 'User: ' + user.info().username,
+				action: 'userConfig'
+			}
+		];
+	};
+	
+	$scope.$on('login', function(event) {
+		createUserMenu();
+	});
+	
+	$scope.$on('logout', function(event) {
+		$scope.userMenu = defaultMenu;
+	});
+	
 	$scope.userMenu = defaultMenu;
 	
 	var modalInstance;
 	
 	$scope.execute = function(action) {
 		if(action == 'login') {
-			var result = dialog.open('partials/login.html');
-			result.then(function(result) {
-				$log.debug(result);
-				$scope.userMenu = [
-					{
-						name: 'User: ' + result.username, //NOTE don't trust this value in real apps!
-						action: 'userConfig'
-					}
-				];
-				alert('Logged in!');
+			dialog.open('partials/login.html').then(function() {
+				createUserMenu();
 			},function(reason) {
+				$log.error('Bad username or password');
 				$log.debug(reason);
 			});
+		}
+		else if(action == 'userConfig') {
+			alert("TODO: add some user related actions here");
 		}
 		else {
 			$log.error('Unknown action ' + action);
@@ -68,24 +159,66 @@ appCtrls.controller('userCtrl', ['dialog','$scope','$log', function(dialog, $sco
 }]);
 
 
-appCtrls.controller('loginCtrl', ['dialog','$scope','$cookies','$log',function(dialog,$scope,$cookies,$log) {
+
+/**
+ * Controller for the login button
+ */
+appCtrls.controller('loginButtonCtrl', ['dialog','$scope','$log',function(dialog,$scope,$log) {
+	
+	$scope.login = function() {
+		dialog.open('partials/login.html').then(function() {
+			//Login success
+		}, function(reason) {
+			$log.error('Bad username or password');
+			$log.debug(reason);
+		});
+	};
+}]);
+
+
+
+/**
+ * Adds login form to the main page
+ */
+appCtrls.controller('loginFormCtrl', ['$scope',function($scope) {
+	$scope.include = 'partials/login.html';
+}]);
+
+
+
+/**
+ * Controller for the login form
+ */
+appCtrls.controller('loginCtrl', ['user','dialog','$scope','$log',function(user,dialog,$scope,$log) {
+	
+	$scope.loggedIn = false;
 	
 	$scope.dismiss = function(reason) {
 		dialog.cancel(reason);
 	};
 	
-	var $loginFrame = $('#loginFrame');
-	
-	$loginFrame.on('load',function() {
-		var result = $.parseJSON($loginFrame.contents().text());
-		if(result.status == 'ok') {
-			$log.debug('User authentication ok');
-			dialog.ok(result);
+	$scope.login = function() {
+		user.login($scope.username, $scope.password);
+		if(user.token) {
+			dialog.ok();
 		}
 		else {
-			$log.warn("Login error");
-			//TODO show user a error message
+			alert("Login failed");
 		}
+	}
+	
+	$scope.logout = function() {
+		user.logout();
+	};
+	
+	$scope.$on('userLogin', function(event) {
+		$log.debug(event);
+		$scope.loggedIn = true;
+	});
+	
+	$scope.$on('userLogout', function(event) {
+		$log.debug(event);
+		$scope.loggedIn = false;
 	});
 }]);
 
