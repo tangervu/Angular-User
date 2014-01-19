@@ -6,12 +6,15 @@ app.factory('dialog', ['$modal','$log',function($modal,$log) {
 	var modalInstance;
 	return {
 		open: function(url) {
+			$log.debug("[factory:dialog] Dialog open");
 			modalInstance = $modal.open({
 				templateUrl: url
 			});
 			return modalInstance.result;
 		},
 		ok: function(results) {
+			$log.debug("[factory:dialog] Dialog close");
+			$log.debug(results);
 			if(modalInstance) {
 				modalInstance.close(results);
 			}
@@ -20,6 +23,8 @@ app.factory('dialog', ['$modal','$log',function($modal,$log) {
 			}
 		},
 		cancel: function(reason) {
+			$log.debug("[factory:dialog] Dialog dismiss");
+			$log.debug(reason);
 			if(modalInstance) {
 				modalInstance.dismiss(reason);
 			}
@@ -30,188 +35,123 @@ app.factory('dialog', ['$modal','$log',function($modal,$log) {
 	};
 }]);
 
-app.factory('user', ['dialog', '$http', '$cookies', '$cookieStore', '$rootScope', '$log', function(dialog, $http, $cookies, $cookieStore, $rootScope, $log) {
+app.factory('user', ['dialog', '$http', '$cookies', '$cookieStore', '$rootScope', '$interval', '$log', function(dialog, $http, $cookies, $cookieStore, $rootScope, $interval, $log) {
 	
 	var token;
 	
-	if($cookies.token) {
-		console.log('loggedIn');
-		token = $cookies.token;
-		$rootScope.$broadcast('login');
-	}
-	
-	return {
+	var user = {
 		login: function(user, pass, persistent) {
-			$http.post('api/login.php', {username: user, password: pass}).success(function(data) {
-				$log.debug(data);
-				if(data.status == "ok") {
-					$log.debug("Login ok");
-					$cookies.token = data.token; //NOTE angularjs cookies are not able to change cookie lifetime etc.
-					token = data.token;
+			var request = {username: user, password: pass};
+			$log.debug("[factory:user] Post login request");
+			$log.debug(request);
+			var promise = $http.post('api/login.php', request).then(function(response) {
+				$log.debug("[factory:user] Got login response");
+				$log.debug(response);
+				if(response.data && response.data.status == "ok") {
+					$log.debug("[factory:user] Login ok");
+					$cookies.token = response.data.token; //NOTE angularjs cookies are not able to change cookie lifetime etc.
+					token = response.data.token;
 					$rootScope.$broadcast('login');
+					renew(response.data.lifetime);
 					return true;
 				}
 				else {
-					alert("Login failed");
+					$log.debug("[factory:user] Login failed");
+					//alert("Login failed");
 					return false;
 				}
-			}).error(function() {
-				return false;
 			});
+			$log.debug('[factory:user] Login promise created')
+			$log.debug(promise);
+			return promise;
 		},
 		logout: function() {
-			$http.post('api/logout.php', {token: token});
+			$log.debug("[factory:user] Post logout request");
+			$log.debug(token);
+			$http.post('api/logout.php', {token: token}).then(function(response) {
+				$log.debug("[factory:user] Got logout response");
+				$log.debug(response);
+			});
 			token = null;
 			$cookieStore.remove('token');
 			$rootScope.$broadcast('logout');
 			return true;
 		},
 		renew: function() {
-			$http.post('api/renew.php', {token: token}).success(function(data) {
-				if(data.status == "ok") {
-					$log.debug("Token renew ok");
-					$cookies.token = data.token;
-					token = data.token;
+			$log.debug("[factory:user] Post token renew request for token " + token);
+			var promise = $http.post('api/renew.php', {token: token}).then(function(response) {
+				$log.debug("[factory:user] Got renew response");
+				$log.debug(response);
+				if(response.data && response.data.status == "ok") {
+					$log.debug("[factory:user] Token renew ok, new token " + response.data.token);
+					$cookies.token = response.data.token;
+					token = response.data.token;
+					renew(response.data.lifetime);
 					return true;
 				}
 				else {
-					$log.error("Token renew failed");
+					$log.error("[factory:user] Token renew failed");
 					return false;
 				}
 			});
+			$log.debug("[factory:user] Created token renew promise");
+			$log.debug(promise);
+			return promise;
 		},
-		info: {
-			/* FIXME
-			$http.post('api/user.php', {token: tokens}).success(function(data) {
-				if(data.status == "ok") {
-					$log.debug("User info ok");
-					username = data.username;
+		verify: function() {
+			$log.debug('[factory:user] Post verify request');
+			$log.debug({token: token});
+			var promise = $http.post('api/user.php', {token: token}).then(function(response) {
+				$log.debug('[factory:user] Got verify response');
+				$log.debug(response);
+				if(response.data && response.data.status == "ok") {
+					$log.debug("[factory:user] Got username: " + response.data.username);
+					return {
+						username: response.data.username,
+						lifetime: response.data.lifetime
+					};
 				}
 				else {
-					$log.error("Token renew failed");
-					username = null;
+					$log.error("[factory:user] User verify error");
+					return false;
 				}
+				
 			});
-			*/
+			$log.debug('[factory:user] Created verify promise');
+			$log.debug(promise);
+			return promise;
 		}
 	};
-}]);
-
-/**
- * Sample application controllers
- */
-
-var appCtrls = angular.module('appCtrls', []);
-
-
-
-/**
- * Controller for the navbar login link
- */
-appCtrls.controller('userCtrl', ['user','dialog','$scope','$log', function(user, dialog, $scope, $log) {
 	
-	var defaultMenu = [
-		{
-			name: "Login",
-			action: 'login'
-		}
-	];
+	var renew = function(lifetime) {
+		$log.debug('[factory:user] Interval created, lifetime ' + lifetime);
+		$interval(function() {
+			$log.debug('[factory:user] Interval for renew');
+			user.renew();
+		}, lifetime*1000, 1);
+		
+	};
 	
-	var createUserMenu = function() {
-		$scope.userMenu = [
-			{
-				name: 'User: FIXME', // + user.info().username,
-				action: 'userConfig'
+	if($cookies.token) {
+		$log.debug("[factory:user] Has token cookie: " + $cookies.token);
+		token = $cookies.token;
+		var promise = user.verify();
+		promise.then(function(response) {
+			$log.debug("[factory:user] Verify response")
+			$log.debug(response);
+			if(response && response.username) {
+				renew(response.lifetime);
+				$rootScope.$broadcast('login');
 			}
-		];
-	};
-	
-	$scope.$on('login', function(event) {
-		createUserMenu();
-	});
-	
-	$scope.$on('logout', function(event) {
-		$scope.userMenu = defaultMenu;
-	});
-	
-	$scope.userMenu = defaultMenu;
-	
-	var modalInstance;
-	
-	$scope.execute = function(action) {
-		if(action == 'login') {
-			dialog.open('partials/login.html').then(function() {
-				createUserMenu();
-			},function(reason) {
-				$log.error('Bad username or password');
-				$log.debug(reason);
-			});
-		}
-		else if(action == 'userConfig') {
-			alert("TODO: add some user related actions here");
-		}
-		else {
-			$log.error('Unknown action ' + action);
-		}
-	};
-}]);
-
-
-
-/**
- * Controller for the login button
- */
-appCtrls.controller('loginButtonCtrl', ['dialog','$scope','$log',function(dialog,$scope,$log) {
-	
-	$scope.login = function() {
-		dialog.open('partials/login.html').then(function() {
-			//Login success
-		}, function(reason) {
-			$log.error('Bad username or password');
-			$log.debug(reason);
+			else {
+				$log.error("[factory:user] User verify error");
+				token = null;
+				$cookieStore.remove('token');
+				$rootScope.$broadcast('logout');
+			}
 		});
-	};
-}]);
-
-
-
-/**
- * Adds login form to the main page
- */
-appCtrls.controller('loginFormCtrl', ['$scope',function($scope) {
-	$scope.include = 'partials/login.html';
-}]);
-
-
-
-/**
- * Controller for the login form
- */
-appCtrls.controller('loginCtrl', ['user','dialog','$scope','$log',function(user,dialog,$scope,$log) {
-	
-	$scope.loggedIn = false;
-	
-	$scope.dismiss = function(reason) {
-		dialog.cancel(reason);
-	};
-	
-	$scope.login = function() {
-		user.login($scope.username, $scope.password);
-		dialog.ok();
 	}
 	
-	$scope.logout = function() {
-		user.logout();
-	};
-	
-	$scope.$on('login', function(event) {
-		$log.debug(event);
-		$scope.loggedIn = true;
-	});
-	
-	$scope.$on('logout', function(event) {
-		$log.debug(event);
-		$scope.loggedIn = false;
-	});
+	return user;
 }]);
 

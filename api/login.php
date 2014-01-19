@@ -24,6 +24,7 @@ if($request->username == $user && $request->password == $pass) {
 	else {
 		$response->persistent = false;
 	}
+	$response->lifetime = 123; //how many seconds the token is valid
 }
 else {
 	$response->status = 'error';
